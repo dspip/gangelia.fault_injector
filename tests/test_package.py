@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 EXTENSION_ROOT = Path(__file__).parents[1]
-FORBIDDEN_IMPORTS = ("lerobot", "fault_system", "libero", "robosuite")
+FORBIDDEN_IMPORTS = ("lerobot", "lerobot_faults", "fault_system", "libero", "robosuite")
 
 
 def test_manifest_registers_the_extension() -> None:

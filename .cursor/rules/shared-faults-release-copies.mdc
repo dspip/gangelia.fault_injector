@@ -1,0 +1,21 @@
+---
+description: Generated shared_faults copies in an Isaac release are untouchable
+alwaysApply: true
+---
+
+# Generated shared_faults copies
+
+Edit the fault list and the drop behavior only in the repository-root `shared_faults/` package:
+
+- `shared_faults/__init__.py`
+- `shared_faults/catalog.py`
+- `shared_faults/drop_rule.py`
+- `shared_faults/basket_drop.py` stays here. It is not copied into the Isaac release.
+
+`isaac/gangelia.fault_injector/release/assemble.py` writes a release tree. In that tree, `shared_faults/__init__.py`, `catalog.py`, and `drop_rule.py` are byte copies of the files above. They are untouchable.
+
+Do not edit, reformat, comment, or patch those copies. Do not commit `isaac/gangelia.fault_injector/shared_faults/` in this repository. Do not add `basket_drop.py` to a release.
+
+To change a release, edit the repository-root files, run the tests, and assemble again.
+
+Example: a drop-threshold change belongs in `shared_faults/drop_rule.py`. It does not belong in a release checkout of `dspip/gangelia.fault_injector`.

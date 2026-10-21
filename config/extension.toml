@@ -1,18 +1,21 @@
 [package]
 name = "gangelia.fault_injector"
-version = "0.1.0"
+version = "0.2.0"
 category = "Simulation"
 title = "Gangelia Fault Injector"
 description = "Inject a planner-independent mid-air drop by opening a simulated gripper."
 authors = ["Gangelia"]
 keywords = ["isaac sim", "robotics", "fault injection", "gripper"]
 readme = "docs/README.md"
+icon = "data/icon.png"
+preview_image = "data/preview.png"
 repository = "https://github.com/dspip/gangelia.fault_injector"
 support_level = "sample"
 writeTarget.kit = true
 
 [dependencies]
 "isaacsim.core.api" = {}
+"isaacsim.robot_motion.motion_generation" = {}
 "omni.kit.uiapp" = {}
 
 [[python.module]]
