@@ -8,8 +8,63 @@
 from __future__ import annotations
 
 import math
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
+
+# camera_noise.py is Pro only. A Community package is complete without it.
+_BUNDLE_FILES = ("__init__.py", "catalog.py", "drop_rule.py")
+
+
+def shared_faults_import_root(core_file: Path) -> Path:
+    """Return the directory that must be on sys.path to import shared_faults.
+
+    A release tree carries generated copies in ``<extension>/shared_faults``.
+    Those copies win so a Community install does not need the Gangelia checkout.
+    A checkout with no copies uses ``shared_faults/`` at the repository root.
+    """
+    extension_root = core_file.resolve().parents[2]
+    bundled = extension_root / "shared_faults"
+    if bundled.exists():
+        missing = [name for name in _BUNDLE_FILES if not (bundled / name).is_file()]
+        if missing:
+            raise ImportError(
+                "The shared_faults copy inside the extension is incomplete: "
+                + ", ".join(missing)
+                + f". Looked at {bundled}."
+            )
+        return extension_root
+
+    repo_root = core_file.resolve().parents[4]
+    catalog = repo_root / "shared_faults" / "catalog.py"
+    if not catalog.is_file():
+        raise ImportError(
+            "Could not find shared_faults next to the isaac folder. "
+            f"Looked at {catalog}."
+        )
+    return repo_root
+
+
+def _load_shared_faults() -> None:
+    """Put the shared_faults location for this install on sys.path."""
+    root = str(shared_faults_import_root(Path(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
+_load_shared_faults()
+
+from shared_faults.catalog import (  # noqa: E402
+    DEMO_FAULT_NOTICE,
+    FAULT_CHOICES,
+    FaultChoice,
+    fault_choices,
+    fault_notice,
+    fault_notice_for,
+    fault_panel,
+)
+from shared_faults.drop_rule import AutomaticDrop, AutomaticDropConfig, CarrySample  # noqa: E402
 
 
 class JointPositionDriver(Protocol):
@@ -120,31 +175,6 @@ ROBOTIQ_2F85_PROFILE = ParallelGripperProfile(
 PRESETS: tuple[ParallelGripperProfile, ...] = (PANDA_PROFILE, ROBOTIQ_2F85_PROFILE)
 CUSTOM_PROFILE_INDEX = len(PRESETS)
 PANDA_ADAPTER = PANDA_PROFILE.as_adapter()
-DEMO_FAULT_NOTICE = "Demo Version - Contact Gangelia"
-
-
-@dataclass(frozen=True)
-class FaultChoice:
-    """One row in the fault list. Unavailable rows show the demo notice."""
-
-    name: str
-    available: bool
-
-
-FAULT_CHOICES: tuple[FaultChoice, ...] = (
-    FaultChoice("Drop", True),
-    FaultChoice("Object Over Object", False),
-    FaultChoice("Camera Noise", False),
-    FaultChoice("Object Collision", False),
-)
-
-
-def fault_notice(index: int) -> str | None:
-    """Return the demo notice for a locked fault, or None when that fault runs."""
-    choice = FAULT_CHOICES[index]
-    if choice.available:
-        return None
-    return DEMO_FAULT_NOTICE
 
 
 def parse_parallel_gripper_profile(
@@ -221,139 +251,6 @@ def resolve_joint_indices(
         raise ValueError(f"articulation is missing gripper joint(s): {', '.join(missing)}")
     return tuple(available[name] for name in gripper_joint_names)
 
-
-@dataclass(frozen=True)
-class AutomaticDropConfig:
-    """Pickup detector and per-step drop probability.
-
-    Probability is rolled once per physics step after pickup is confirmed.
-    It is not a rate per second, so a faster physics rate makes drops more frequent.
-    With ``rearm_after_drop``, a finished drop watches for the next pickup once the
-    object is farther from the grasp frame than the profile distance.
-    """
-
-    min_lift_m: float = 0.03
-    together_tolerance_m: float = 0.01
-    confirm_steps: int = 6
-    probability_per_step: float = 0.0001
-    latch_steps: int = 30
-    rearm_after_drop: bool = False
-
-    def __post_init__(self) -> None:
-        """Reject a configuration that cannot describe a pickup or a drop."""
-        if self.min_lift_m <= 0:
-            raise ValueError("min_lift_m must be positive")
-        if self.together_tolerance_m < 0:
-            raise ValueError("together_tolerance_m must be non-negative")
-        if self.confirm_steps < 1:
-            raise ValueError("confirm_steps must be at least 1")
-        if not 0.0 <= self.probability_per_step <= 1.0:
-            raise ValueError("probability_per_step must be between 0 and 1")
-        if self.latch_steps < 1:
-            raise ValueError("latch_steps must be at least 1")
-
-
-@dataclass(frozen=True)
-class CarrySample:
-    """One physics-step view of the target object and the gripper."""
-
-    object_position: tuple[float, float, float]
-    gripper_position: tuple[float, float, float]
-    gripper_joint_positions: tuple[float, ...]
-
-
-class AutomaticDrop:
-    """Confirm a geometric pickup, then roll a drop on every later physics step.
-
-    Pickup requires the named object to be near the grasp frame, the jaws past the
-    profile's closure threshold, the object lifted from its first observed height,
-    and the gap stable.
-    After confirmation, each step draws one random number. A hit commands the
-    gripper open for ``latch_steps`` consecutive steps, then stops.
-    """
-
-    def __init__(self, config: AutomaticDropConfig, profile: ParallelGripperProfile, rng: object) -> None:
-        """Store the detector settings and the random source used for each step."""
-        self._profile = profile
-        self._config = config
-        self._rng = rng
-        self._phase = "watching"
-        self._confirm = 0
-        self._latch_left = 0
-        self._rest_z: float | None = None
-        self._previous_gap: float | None = None
-
-    @property
-    def phase(self) -> str:
-        """Current detector phase: watching, armed, latching, or done."""
-        return self._phase
-
-    def observe(self, sample: CarrySample) -> bool:
-        """Return whether this step should command the gripper open.
-
-        Args:
-            sample: Object position, gripper position, and finger joint positions.
-
-        Returns:
-            True while the open command must be reasserted.
-        """
-        if self._phase == "done":
-            if self._config.rearm_after_drop and (
-                _distance(sample.object_position, sample.gripper_position)
-                > self._profile.distance_threshold_m
-            ):
-                self._phase = "watching"
-                self._confirm = 0
-                self._rest_z = None
-                self._previous_gap = None
-            return False
-        if self._phase == "latching":
-            self._latch_left -= 1
-            if self._latch_left <= 0:
-                self._phase = "done"
-            return True
-
-        gap = _distance(sample.object_position, sample.gripper_position)
-        held = self._is_held(sample, gap)
-        self._previous_gap = gap
-        if self._phase == "watching":
-            self._confirm = self._confirm + 1 if held else 0
-            if self._confirm < self._config.confirm_steps:
-                return False
-            self._phase = "armed"
-        elif not held and gap > self._profile.distance_threshold_m:
-            self._phase = "watching"
-            self._confirm = 0
-            return False
-
-        if float(self._rng.random()) < self._config.probability_per_step:
-            self._phase = "latching"
-            self._latch_left = self._config.latch_steps - 1
-            if self._latch_left <= 0:
-                self._phase = "done"
-            return True
-        return False
-
-    def _is_held(self, sample: CarrySample, gap: float) -> bool:
-        if self._rest_z is None:
-            self._rest_z = sample.object_position[2]
-        elif self._phase == "watching":
-            self._rest_z = min(self._rest_z, sample.object_position[2])
-        if len(sample.gripper_joint_positions) != len(self._profile.joint_names):
-            raise ValueError("gripper sample does not match the adapter joints")
-        if self._profile.closure(sample.gripper_joint_positions) < self._profile.min_closure:
-            return False
-        if gap > self._profile.distance_threshold_m:
-            return False
-        if sample.object_position[2] < self._rest_z + self._config.min_lift_m:
-            return False
-        if self._previous_gap is None:
-            return False
-        return abs(gap - self._previous_gap) <= self._config.together_tolerance_m
-
-
-def _distance(start: tuple[float, float, float], end: tuple[float, float, float]) -> float:
-    return math.sqrt(sum((left - right) ** 2 for left, right in zip(start, end, strict=True)))
 
 
 def inject_drop(driver: JointPositionDriver, adapter: GripperAdapter) -> DropInjectionResult:

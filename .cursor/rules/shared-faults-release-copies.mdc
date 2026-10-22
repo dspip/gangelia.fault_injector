@@ -1,0 +1,43 @@
+---
+description: Generated shared_faults copies in an Isaac release are untouchable
+alwaysApply: true
+---
+
+# Community and Pro are two packages from one branch
+
+## Ask. Do not decide the edition.
+
+When a fault is new, or you are about to include a fault's files in the Community package or the Pro package, stop and ask the user: "Is this fault Pro or Community?"
+
+Do not guess from the fault's name, from another fault, or from code that already exists. Wait for the answer. Then set `pro_only` and the Pro file tuples to match that answer.
+
+Camera Noise is Pro, and Drop is Community, only because the user already said so. Those two answers do not decide any other fault.
+
+Develop in this repository. Do not make a Pro branch and a Community branch. Do not keep a second copy of the drop code.
+
+`isaac/gangelia.fault_injector/release/assemble.py` writes the package. The file names it must leave out of the Community package are `PRO_SHARED_FILES`, `PRO_EXTENSION_FILES`, `PRO_EXTENSION_TESTS`, and `PRO_SCRIPT_NAMES` in `shared_faults/catalog.py`.
+
+- `python isaac/gangelia.fault_injector/release/assemble.py DESTINATION` writes the Community package. This is the only package that may replace `dspip/gangelia.fault_injector` (the local checkout is `/home/aviya/Projects/gangelia.fault_injector`). Push that repo to publish to NVIDIA.
+- `python isaac/gangelia.fault_injector/release/assemble.py DESTINATION pro` writes the Pro package. Do not copy it into `dspip/gangelia.fault_injector`. Do not push it to NVIDIA.
+
+Camera Noise is Pro. Automatic drop is Community, so the drop fix is in the Community package. A new Pro fault sets `pro_only=True` and adds its files to those tuples. A new Community fault stays out of those tuples. The script refuses a Community package that still contains a listed file.
+
+`GANGELIA_FAULT_INJECTOR_EDITION=pro` does not add missing files. The local launcher may set it because this checkout contains the Pro files. Do not set it inside the Community package, and do not copy `isaac/load_fault_injection_scene.py` or `isaac/camera_noise_proof.py` into the NVIDIA repo.
+
+## Generated copies
+
+Edit the fault list and the drop behavior only in the repository-root `shared_faults/` package:
+
+- `shared_faults/__init__.py`
+- `shared_faults/catalog.py`
+- `shared_faults/drop_rule.py`
+- `shared_faults/camera_noise.py` stays here. The Pro package copies it. The Community package does not.
+- `shared_faults/basket_drop.py` stays here. It is not copied into either Isaac package.
+
+In a built package, the copied `shared_faults` files are byte copies. They are untouchable.
+
+Do not edit, reformat, comment, or patch those copies. Do not commit `isaac/gangelia.fault_injector/shared_faults/` in this repository. Do not add `basket_drop.py` to a release. Do not add `camera_noise.py` to a Community release.
+
+To change a release, edit the repository-root files, run the tests, and assemble again.
+
+Example: a drop-threshold change belongs in `shared_faults/drop_rule.py`. It is in both packages. It does not belong in a release checkout of `dspip/gangelia.fault_injector` as a hand edit.
